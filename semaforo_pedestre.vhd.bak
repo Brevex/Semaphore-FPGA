@@ -1,0 +1,188 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity semaforo_pedestre is
+    port (
+        clk               : in std_logic;
+        reset             : in std_logic;
+        botao_pedestre    : in std_logic;
+        sinal_emergencia  : in std_logic; 
+        desliga_semaforo  : in std_logic;
+
+        led_pode_passar   : out std_logic; -- verde
+        led_atencao       : out std_logic; -- amarelo
+        led_perigo        : out std_logic; -- vermelho
+        led_sistema       : out std_logic; -- indica sistema ativo
+
+        display1          : out bit_vector(6 downto 0);  
+        display2          : out bit_vector(6 downto 0)
+    );
+end entity;
+
+architecture behav of semaforo_pedestre is
+
+    type estado_tipo is (DESLIGADO, PODE_PASSAR, ATENCAO, PERIGO, EMERGENCIA);
+    signal estado_atual, proximo_estado : estado_tipo;
+
+    signal contador : integer := 0;
+    constant TEMPO_PODE_PASSAR : integer := 5;
+    constant TEMPO_ATENCAO     : integer := 3;
+    constant TEMPO_PERIGO      : integer := 4;
+    constant TEMPO_EMERGENCIA  : integer := 5;
+
+    signal pedestre_esperando : std_logic := '0';
+
+    -- sinais para o display
+    signal entrada_display1 : bit_vector(4 downto 0);
+    signal entrada_display2 : bit_vector(4 downto 0);
+    signal out1 : bit_vector(6 downto 0);
+    signal out2 : bit_vector(6downto 0);
+
+begin
+
+    -----------------------------
+    -- Transição de estados
+    -----------------------------
+    process(clk, reset)
+    begin
+        if reset = '1' then
+            estado_atual <= DESLIGADO;
+            contador <= 0;
+            pedestre_esperando <= '0';
+
+        elsif rising_edge(clk) then
+            if estado_atual /= DESLIGADO and estado_atual /= EMERGENCIA then
+                if botao_pedestre = '1' then
+                    pedestre_esperando <= '1';
+                end if;
+            end if;
+
+            if contador > 0 then
+                contador <= contador - 1;
+            else
+                estado_atual <= proximo_estado;
+
+                case proximo_estado is
+                    when PODE_PASSAR =>
+                        contador <= TEMPO_PODE_PASSAR;
+                        pedestre_esperando <= '0';
+
+                    when ATENCAO =>
+                        contador <= TEMPO_ATENCAO;
+
+                    when PERIGO =>
+                        contador <= TEMPO_PERIGO;
+
+                    when EMERGENCIA =>
+                        contador <= TEMPO_EMERGENCIA;
+
+                    when DESLIGADO =>
+                        contador <= 0;
+                end case;
+            end if;
+        end if;
+    end process;
+
+    -----------------------------
+    -- Lógica de transição
+    -----------------------------
+    process(estado_atual, pedestre_esperando, sinal_emergencia, desliga_semaforo)
+    begin
+        case estado_atual is
+            when DESLIGADO =>
+                if desliga_semaforo = '0' then
+                    proximo_estado <= PODE_PASSAR;
+                else
+                    proximo_estado <= DESLIGADO;
+                end if;
+
+            when PODE_PASSAR =>
+                if desliga_semaforo = '1' then
+                    proximo_estado <= DESLIGADO;
+                elsif sinal_emergencia = '1' then
+                    proximo_estado <= EMERGENCIA;
+                elsif pedestre_esperando = '1' then
+                    proximo_estado <= ATENCAO;
+                else
+                    proximo_estado <= PODE_PASSAR;
+                end if;
+
+            when ATENCAO =>
+                if desliga_semaforo = '1' then
+                    proximo_estado <= DESLIGADO;
+                elsif sinal_emergencia = '1' then
+                    proximo_estado <= EMERGENCIA;
+                else
+                    proximo_estado <= PERIGO;
+                end if;
+
+            when PERIGO =>
+                if desliga_semaforo = '1' then
+                    proximo_estado <= DESLIGADO;
+                elsif sinal_emergencia = '1' then
+                    proximo_estado <= EMERGENCIA;
+                else
+                    proximo_estado <= PODE_PASSAR;
+                end if;
+
+            when EMERGENCIA =>
+                if desliga_semaforo = '1' then
+                    proximo_estado <= DESLIGADO;
+                else
+                    proximo_estado <= PODE_PASSAR;
+                end if;
+        end case;
+    end process;
+
+    -----------------------------
+    -- Saída dos LEDs
+    -----------------------------
+    led_pode_passar <= '0' when estado_atual = PODE_PASSAR else '1';
+    led_atencao     <= '0' when estado_atual = ATENCAO     else '1';
+    led_perigo      <= '0' when estado_atual = PERIGO      else '1';
+    led_sistema     <= '1' when estado_atual = DESLIGADO   else '0';
+
+    -----------------------------
+    -- Display 7 segmentos
+    -----------------------------
+
+    -- Codificação do estado
+    with estado_atual select
+        entrada_display1 <= "10000" when PODE_PASSAR,  -- "P"
+                            "10001" when ATENCAO,      -- "A"
+                            "10011" when PERIGO,       -- "E"
+                            "10100" when EMERGENCIA,   -- "H"
+                            "11111" when others;       -- Apagado
+
+    -- Codificação do contador
+    with contador select
+        entrada_display2 <= "10001" when 1,
+                            "10010" when 2,
+                            "10011" when 3,
+                            "10100" when 4,
+                            "10101" when 5,
+                            "11111" when others;
+
+    -- Conversão para display1 entrada_display1
+    with entrada_display1 select
+        out1 <= "0001100" when "10000", -- P
+                "0001000" when "10001", -- A
+                "0000110" when "10011", -- E
+                "0001001" when "10100", -- H
+                "1111111" when others;
+					 
+    -- Conversão para display2
+    with entrada_display2 select
+        out2 <= "1000000" WHEN "10000",
+						"1111001" WHEN "10001", 
+						"0100100" WHEN "10010", 
+						"0110000" WHEN "10011", 
+						"0011001" WHEN "10100",
+						"0010010" WHEN "10101",
+						"1111111" WHEN OTHERS;
+					 
+    display1 <=  out1; --"1100110" ;--out1; --- 
+    display2 <=  out2; --"0011000" ;--out2; --- 9 
+
+end architecture;
